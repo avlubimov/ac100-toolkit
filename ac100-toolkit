@@ -1,0 +1,241 @@
+#!/usr/bin/python
+
+#This script has been made by Tactilofan and is under GPL 2.0 Licence
+# http://www.blogarm.net/ac100-toolkit/
+
+
+import os, re, sys,commands, time;
+
+
+
+
+#print USAGE file
+def print_help():
+	os.system("cat USAGE")
+
+#********************************************************
+#********  md5 filecheck function ***********************
+#********************************************************
+
+
+def check_image_file(file_name):
+	check = 0
+	if os.path.isfile(file_name) and os.path.isfile(file_name+".md5sum"):
+		md5sum = commands.getoutput("md5sum -c "+file_name+".md5sum");
+		print md5sum
+		if re.match(file_name+": OK",md5sum):
+			check = 1
+	return check
+
+
+
+#******************************************************************************
+#*************** NVFLASH simplified functions *********************************
+#******************************************************************************
+
+#easyly executes nvflash
+def execute_nvflash(params):
+	nvflash_path = "./linux4tegra/nvflash/";
+	ret = os.system("sudo LD_LIBRARY_PATH="+nvflash_path+" "+nvflash_path+"nvflash "+params);
+	print "\n"
+	return ret
+
+#execute nvflash and return the stdout
+def return_nvflash_stdout(params):
+	nvflash_path = "./linux4tegra/nvflash/";
+	return commands.getoutput("sudo LD_LIBRARY_PATH="+nvflash_path+" "+nvflash_path+"nvflash "+params);
+
+#load the bootloader in ram
+def load_bootloader_in_ram():
+	return execute_nvflash("--bl ./linux4tegra/prebuilt/fastboot.stock.bin --go");
+
+
+#backup a partition
+def backup_partition(PartitionId,output_folder = ""):
+	nvflash_param = "-r --read "+str(PartitionId)+" " + output_folder+"tac100-part-"+str(PartitionId)+".img";
+	execute_nvflash(nvflash_param)
+
+#downloads partition table
+def get_partition_table(output_file="./tac100-partitiontable.txt"):
+	execute_nvflash("-r --getpartitiontable "+output_file);
+	
+#write the given in the given partition number
+def restore_partition_from_file(partition_id,file_adress):
+	execute_nvflash("--resume --download "+str(partition_id)+" "+file_adress+ " --go")
+
+def prepare_for_ubuntu():
+	print "done in args parsing"
+	
+	
+	
+#this function takes an partition table file at input and return a dictionnary with all partition data ordered by partition
+def read_partition_table(input_file):
+	#opens the file
+	partition_table_file = open(input_file);
+	
+	#removes the somes useless caracters
+	partition_table = partition_table_file.read().replace("\r","");
+	partition_table = partition_table.replace("\n\n","\n");
+	
+	#split the file into a list where each item of the list is a line
+	partition_table = partition_table.split("\n");
+	partition_dico = {}
+	
+	#reads all the lines
+	for line in partition_table:
+		if(line!=""):
+			#split the line to parse parameters and values
+			line = line.split("=");
+			field = line[0];
+			value = line[1];
+			
+			#if the line contain a new PartitionId, it create a new dictionary into the partition dictionary
+			if(field == "PartitionId"):
+				current_partition = value;
+				partition_dico[current_partition] = {};
+				
+			partition_dico[current_partition][field] = value;
+	return partition_dico
+	
+
+def print_message(message):
+    print '************************************************************************'
+    print  message
+    print '************************************************************************'
+
+
+def wait_for_connection(current_partition, partition_number, total_partitions_count):
+    initial = os.popen("dmesg|grep -i nvidia|wc -l").read()
+    while 1:
+        if (os.system("sh -c \"grep -q 0955  /sys/bus/usb/devices/*/idVendor\"") == 0
+                and (current_partition == 0 or initial != os.popen("dmesg|grep -i nvidia|wc -l").read())):
+                print_message ("Connected to device! Going to write partition #" + str(partition_number))
+                return
+        message = "Current partition #" + str(partition_number) + ", " + str(current_partition) + " of " + str(total_partitions_count);
+        message += " = " + str(total_partitions_count + 1 - current_partition) + " partition[s] remain.\n\n";
+        if os.system("sh -c \"grep -q 0955  /sys/bus/usb/devices/*/idVendor\"") == 0:
+                message += "\nWaiting for reinitialization!\n\nPower off the device: press POWER button for more than 10 seconds;\n Then ";
+        message += "press CTRL + ESCAPE + POWER  on smartbook to get into recovery mode \n"
+        if os.system("sh -c \"grep -q 0955  /sys/bus/usb/devices/*/idVendor\"") == 0:
+                message += "while the smartbook is still being powered off."
+        print_message (message)
+        time.sleep(2)
+
+def rebuild_partition_table(android_version):
+    images_path = "./images/2.1"
+    if android_version == "2.2":
+        images_path = "./images/2.2"
+
+    partitions = range(2, 14)
+    if len(sys.argv) > 3:
+            del partitions[:]
+            i = 3
+            while i < len(sys.argv):
+                partitions.append(int(sys.argv[i]))
+                i+=1
+
+    counter = 0
+    for i in partitions:
+            counter += 1
+            ret = 1
+            while ret !=  0:
+                image = images_path + "/tac100-part-" + str(i) + ".img"
+                info = read_partition_table(images_path + "/tac100-partitiontable.txt")
+                StartSector = info[str(i)]["StartSector"]
+                NumSectors = info[str(i)]["NumSectors"]
+
+                wait_for_connection(counter, i, len(partitions))
+                ret = load_bootloader_in_ram()
+                if ret == 0:
+                    print_message('Rebuilding the partition #' + str(i) +  "\n./nvflash -r --rawdevicewrite " 
+                            + StartSector + " " +  NumSectors + " " +  image)
+                    ret = execute_nvflash("-r --rawdevicewrite " + StartSector + " " + NumSectors + " "+ image)
+
+        
+#**************************************************************
+#***********  Beginning of the script (args parsing ***********
+#***************************************************************
+
+args = sys.argv;
+
+if(len(args) > 1):
+	if(args[1] == "load-bootloader"):
+		load_bootloader_in_ram();
+	elif(args[1] == "backup"):
+		if(len(args)>3):
+			ouput_folder = args[3];
+		else:
+			output_folder = "";
+		
+		backup_partition(args[2]);
+		
+	elif(args[1] == "backup-all"):
+		print "\n * Loading the bootloader in RAM\n";
+		print "\n * Getting the partition table\n";
+		get_partition_table();
+		
+		for i in range(2,14):
+			print " * Backup of partition #",i,"\n"
+			backup_partition(i,"./");
+		os.system("sudo chmod 777 tac100*.img");
+		os.system("sudo chmod 777 tac100-partitiontable.txt");
+	elif(args[1] == "restore" and len(args)==4):
+		print " * Restoring partition  #",args[2],"\n"
+		restore_partition_from_file(args[2],args[3]);
+	elif args[1] == "build":
+		android_version = "2.1"
+		if len(sys.argv) > 2:
+ 				android_version = sys.argv[2]
+		print " * full revert to android " + android_version + ": building partition table and writing data\n"
+		rebuild_partition_table(android_version);
+
+	elif(args[1] == "prepare-for-ubuntu"):
+		#setting image name and address
+		image_name = "tegra-2.6.29-arm2-ac100-boot.img"
+		image_adress = "http://ac100.gudinna.com/";
+
+
+		#download the image until the md5 is okay
+		while check_image_file(image_name)==0:
+			#if one of the file already exists, it remove it by security.
+			if(os.path.isfile(image_name)):
+				os.system("rm "+image_name);
+			if(os.path.isfile(image_name+".md5sum")):
+				os.system("rm "+image_name+".md5sum");
+			#download the image
+			os.system("wget "+image_adress+image_name);
+			os.system("wget "+image_adress+image_name+".md5sum")
+
+		#mount the image
+		restore_partition_from_file(5,image_name);
+		
+
+	elif(args[1] == "install-nvflash"):
+		nvflash_address = "http://developer.download.nvidia.com/tegra/files/"
+		nvflash_filename = "linux_for_tegra_os_pack_rel_10.8.2_20100903.run.zip"
+		
+		#download nvflash from Nvidia site if it not exists
+		if os.path.isfile(nvflash_filename) == 0:
+			print " * Start downloading NvFlash"
+			os.system("wget "+nvflash_address+nvflash_filename);
+		
+		print "*NvFlash Downloaded"
+		
+		#install it
+		os.system("./setup-nvflash")
+		print " * NvFlash is installed"
+
+	elif(args[1]=="nvf"): #option to execute a nvflash command
+		
+		command_to_execute = ""
+		#construct nvflash param line
+		for i in range(2,len(args)):
+			command_to_execute = command_to_execute + " " + str(args[i])
+		
+		execute_nvflash(command_to_execute)
+	else:
+		print_help();
+else:
+	print_help();
+	
+
