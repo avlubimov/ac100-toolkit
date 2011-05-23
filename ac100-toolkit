@@ -35,15 +35,15 @@ def check_image_file(file_name):
 
 #easyly executes nvflash
 def execute_nvflash(params):
-	nvflash_path = "./linux4tegra/nvflash/";
-	ret = os.system("sudo LD_LIBRARY_PATH="+nvflash_path+" "+nvflash_path+"nvflash "+params);
+	nvflash_path = "./linux4tegra/nvflash";
+	ret = os.system("sudo LD_LIBRARY_PATH=%s %s/nvflash %s" % (nvflash_path,nvflash_path,params));
 	print "\n"
 	return ret
 
 #execute nvflash and return the stdout
 def return_nvflash_stdout(params):
-	nvflash_path = "./linux4tegra/nvflash/";
-	return commands.getoutput("sudo LD_LIBRARY_PATH="+nvflash_path+" "+nvflash_path+"nvflash "+params);
+	nvflash_path = "./linux4tegra/nvflash";
+	return commands.getoutput("sudo LD_LIBRARY_PATH=%s %s/nvflash %s" % (nvflash_path,nvflash_path,params));
 
 #load the bootloader in ram
 def load_bootloader_in_ram():
@@ -52,16 +52,16 @@ def load_bootloader_in_ram():
 
 #backup a partition
 def backup_partition(PartitionId,output_folder = ""):
-	nvflash_param = "-r --read "+str(PartitionId)+" " + output_folder+"tac100-part-"+str(PartitionId)+".img";
+	nvflash_param = "-r --read  %d %stac100-part-%d.img " % (PartitionId,output_folder,PartitionId);
 	execute_nvflash(nvflash_param)
 
 #downloads partition table
 def get_partition_table(output_file="./tac100-partitiontable.txt"):
-	execute_nvflash("-r --getpartitiontable "+output_file);
+	execute_nvflash("-r --getpartitiontable %s" % output_file);
 	
 #write the given in the given partition number
 def restore_partition_from_file(partition_id,file_adress):
-	execute_nvflash("--resume --download "+str(partition_id)+" "+file_adress+ " --go")
+	execute_nvflash("--resume --download %d  %s --go" % (partition_id,file_adress))
 
 def prepare_for_ubuntu():
 	print "done in args parsing"
@@ -125,6 +125,9 @@ def rebuild_partition_table(android_version):
     images_path = "./images/2.1"
     if android_version == "2.2":
         images_path = "./images/2.2"
+    if android_version == "s_alx":
+        images_path = "./images/s_alx"
+
 
     partitions = range(2, 14)
     if len(sys.argv) > 3:
@@ -139,7 +142,7 @@ def rebuild_partition_table(android_version):
             counter += 1
             ret = 1
             while ret !=  0:
-                image = images_path + "/tac100-part-" + str(i) + ".img"
+                image = images_path + "/tac100-part-%d.img" % i 
                 info = read_partition_table(images_path + "/tac100-partitiontable.txt")
                 StartSector = info[str(i)]["StartSector"]
                 NumSectors = info[str(i)]["NumSectors"]
@@ -149,7 +152,7 @@ def rebuild_partition_table(android_version):
                 if ret == 0:
                     print_message('Rebuilding the partition #' + str(i) +  "\n./nvflash -r --rawdevicewrite " 
                             + StartSector + " " +  NumSectors + " " +  image)
-                    ret = execute_nvflash("-r --rawdevicewrite " + StartSector + " " + NumSectors + " "+ image)
+                    ret = execute_nvflash("-r --rawdevicewrite %s %s %s" % (StartSector,NumSectors,image))
 
         
 #**************************************************************
